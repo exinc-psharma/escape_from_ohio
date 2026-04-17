@@ -271,6 +271,29 @@
         g.generateTexture("obsWires", 60, 80);
       }
 
+      // Finish Portal: EXIT
+      if (!scene.textures.exists("finishPortal")) {
+        g.clear();
+        // Left pillar
+        g.fillStyle(0x0a001a, 1);
+        g.fillRect(0, 0, 20, 180);
+        g.lineStyle(4, 0x00ffff, 1);
+        g.strokeRect(0, 0, 20, 180);
+        // Right pillar
+        g.fillStyle(0x0a001a, 1);
+        g.fillRect(100, 0, 20, 180);
+        g.lineStyle(4, 0x00ffff, 1);
+        g.strokeRect(100, 0, 20, 180);
+        // Central Energy Flow
+        g.fillStyle(0x00ffff, 0.2);
+        g.fillRect(20, 20, 80, 140);
+        for(let i=0; i<5; i++) {
+           g.fillStyle(0x00ffff, 0.4);
+           g.fillRect(20, 30 + i*25, 80, 2);
+        }
+        g.generateTexture("finishPortal", 120, 180);
+      }
+
       // Obstacle 3: Ejected Trash
       if (!scene.textures.exists("obsTrash")) {
         g.clear();
@@ -617,6 +640,12 @@
         });
         this.obstacles = [];
         this.physics.add.overlap(this.player, this.obstacleGroup, this.hitObstacle, null, this);
+
+        // --- 6. ENDGAME PORTAL ---
+        this.portalSpawned = false;
+        this.portalReached = false;
+        this.finishPortal = null;
+        this.portalText = null;
 
         // Input Setup
         this.jumpQueuedMs = 9999;
@@ -969,16 +998,46 @@
           this.nextMilestone += 1000;
         }
 
-        if (this.distance >= TARGET_DISTANCE) {
-          this.ending = true;
-          const best = saveBestDistance(this.distance);
-          this.scene.start("WinScene", { bestDistance: best });
-          return;
+        // --- ENDGAME TRANSITION ---
+        if (this.distance >= TARGET_DISTANCE && !this.portalSpawned) {
+          this.portalSpawned = true;
+          // Spawn the physical Exit Portal
+          this.finishPortal = this.add.sprite(GAME_WIDTH + 150, GROUND_TOP, 'finishPortal').setOrigin(0.5, 1).setDepth(15);
+          this.physics.add.existing(this.finishPortal);
+          this.finishPortal.body.setAllowGravity(false);
+          this.finishPortal.body.setImmovable(true);
+          
+          this.portalText = this.add.text(GAME_WIDTH + 150, GROUND_TOP - 200, "EXIT", {
+              fontFamily: "Orbitron, sans-serif",
+              fontSize: "32px",
+              fontStyle: "900",
+              color: "#00ffff"
+          }).setOrigin(0.5).setDepth(16).setShadow(0, 0, "#00ffff", 15, true, true);
+
+          // Notification
+          this.showSpawnAlert("EXIT PORTAL DETECTED");
         }
 
-        // Obstacle Spawner
+        if (this.portalSpawned && this.finishPortal && !this.portalReached) {
+            this.finishPortal.x -= travelPx;
+            this.portalText.x = this.finishPortal.x;
+            this.finishPortal.body.reset(this.finishPortal.x, this.finishPortal.y);
+
+            // Check for player entry
+            if (Phaser.Geom.Intersects.RectangleToRectangle(this.player.getBounds(), this.finishPortal.getBounds())) {
+                this.portalReached = true;
+                this.ending = true;
+                const best = saveBestDistance(this.distance);
+                this.cameras.main.fadeOut(300, 0, 255, 255); // Flash cyan on entry
+                this.cameras.main.once('camerafadeoutcomplete', () => {
+                    this.scene.start("WinScene", { bestDistance: best });
+                });
+            }
+        }
+
+        // Obstacle Spawner - Suppressed in home stretch
         this.spawnProgressPx += travelPx;
-        if (this.spawnProgressPx >= this.nextSpawnGap) {
+        if (this.spawnProgressPx >= this.nextSpawnGap && this.distance < TARGET_DISTANCE - 150) {
           let spannedWidth = this.spawnObstacle();
           this.spawnProgressPx = 0;
           // As speed increases, randomize gaps tightly
