@@ -368,22 +368,38 @@
         this.cameras.main.setBackgroundColor("#050011");
         
         // --- PROACTIVE AUDIO UNLOCKER (Itch.io Fix) ---
-        const startAudio = () => {
-            // Force resume the audio context (required by browsers for autoplay)
-            if (this.sound.context.state === 'suspended') {
-                this.sound.context.resume();
+        // --- AGGRESSIVE AUDIO UNLOCKER (Itch.io/Iframe Fix) ---
+        this.audioStatusText = this.add.text(GAME_WIDTH - 10, GAME_HEIGHT - 10, "AUDIO SYSTEM: INITIALIZING", {
+            fontFamily: "Orbitron, sans-serif", fontSize: "10px", color: "#ffff00"
+        }).setOrigin(1, 1).setDepth(2000);
+
+        const tryResumeAudio = () => {
+            if (this.sound.context.state !== 'running') {
+                this.sound.context.resume().then(() => {
+                    console.log("AudioContext Resumed Successfully");
+                });
             }
-            // ONLY attempt to play if the asset has finished loading into the cache
+            
             if (this.cache.audio.exists('music_drip')) {
                 let m = this.sound.get('music_drip');
-                if (!m) m = this.sound.add('music_drip', { loop: true, volume: 0.3 });
-                if (m && !m.isPlaying) m.play();
+                if (!m) m = this.sound.add('music_drip', { loop: true, volume: 0.4 });
+                if (m && !m.isPlaying) {
+                    m.play();
+                }
             }
         };
 
-        // Listen for ANY interaction to unlock sound
-        this.input.once('pointerdown', startAudio);
-        this.input.keyboard.once('keydown', startAudio);
+        // Aggressive mapping: Listen for ANY interaction to force the context open
+        this.input.on('pointerdown', tryResumeAudio);
+        this.input.keyboard.on('keydown', tryResumeAudio);
+
+        // Phaser 3 built-in unlock listener
+        this.sound.once('unlocked', () => {
+            console.log("Phaser Sound System Unlocked");
+        });
+
+
+
 
         // --- ASSET DIAGNOSTICS ---
         this.load.on('loaderror', (file) => {
@@ -459,6 +475,15 @@
       update() {
         if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
           this.startGame();
+        }
+
+        // Keep status monitor updated
+        if (this.sound.context.state === 'running') {
+            this.audioStatusText.setText("AUDIO SYSTEM: ACTIVE");
+            this.audioStatusText.setColor("#00ff00");
+        } else {
+            this.audioStatusText.setText("AUDIO SYSTEM: BLOCKED (CLICK SCREEN)");
+            this.audioStatusText.setColor("#ff0000");
         }
       }
     }
