@@ -716,13 +716,15 @@
         
         this.cursors = this.input.keyboard.createCursorKeys();
         this.keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+        this.keyW = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
         
         // Mobile tap bridging (handled dynamically in update loop via activePointers, but we keep default block here)
 
         this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
         this.spaceKey.on("down", () => { this.jumpQueuedMs = 0; });
+        this.keyW.on("down", () => { this.jumpQueuedMs = 0; });
         this.domJump = (e) => {
-          if (e.code === "Space" || e.key === " " || e.code === "ArrowUp") {
+          if (e.code === "Space" || e.key === " " || e.code === "ArrowUp" || e.code === "KeyW" || e.key === "w") {
             e.preventDefault();
             this.jumpQueuedMs = 0;
           }
@@ -734,6 +736,7 @@
 
         this.events.once("shutdown", () => {
           this.spaceKey.off("down");
+          this.keyW.off("down");
           window.removeEventListener("keydown", this.domJump);
         });
 
