@@ -367,7 +367,29 @@
       create() {
         this.cameras.main.setBackgroundColor("#050011");
         
-        // Audio will be handled in GameScene for better synchronization with the run starting.
+        // --- PROACTIVE AUDIO UNLOCKER (Itch.io Fix) ---
+        const startAudio = () => {
+            // Force resume the audio context (required by browsers for autoplay)
+            if (this.sound.context.state === 'suspended') {
+                this.sound.context.resume();
+            }
+            // Start subtle menu music as proof of sound
+            let m = this.sound.get('music_drip');
+            if (!m) m = this.sound.add('music_drip', { loop: true, volume: 0.3 });
+            if (m && !m.isPlaying) m.play();
+        };
+
+        // Listen for ANY interaction to unlock sound
+        this.input.once('pointerdown', startAudio);
+        this.input.keyboard.once('keydown', startAudio);
+
+        // --- ASSET DIAGNOSTICS ---
+        this.load.on('loaderror', (file) => {
+            console.error(`CRITICAL: Failed to load asset: ${file.src}`);
+            // Small on-screen alert for the developer
+            this.add.text(10, 10, "LOAD ERROR: CHECK CONSOLE", { fontSize: '12px', color: '#ff0000' }).setDepth(1000);
+        });
+
 
 
         // Background decorative lines
@@ -458,6 +480,9 @@
       }
 
       create() {
+        // Reset sound state to prevent overlapping music on restart
+        this.sound.stopAll();
+        
         createSharedTextures(this);
         
         // --- 1. PREMIUM PARALLAX BACKGROUND ---
