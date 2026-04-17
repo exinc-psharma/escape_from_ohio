@@ -301,10 +301,7 @@
         g.fillRect(0, 0, 80, 100);
         g.lineStyle(4, 0x00ffff, 1);
         g.strokeRect(0, 0, 80, 100);
-        // Stylized antenna base
-        g.lineStyle(2, 0xaaaaaa, 1);
-        g.beginPath(); g.moveTo(40, 100); g.lineTo(40, 130); g.strokePath();
-        g.generateTexture("dataSign", 80, 130);
+        g.generateTexture("dataSign", 80, 100);
       }
 
       // Keypad Button Square
@@ -1262,20 +1259,134 @@
           this.terminalStatus.setColor("#00ff00");
           
           this.time.delayedCall(1000, () => {
+              // Cleanup Terminal UI
+              this.terminalElements.forEach(el => el.destroy());
+              this.terminalActive = false; // Background music resumes flow logic
+              
+              // Cinematic: Escape
               this.ending = true;
-              const best = saveBestDistance(this.distance);
-              this.cameras.main.fadeOut(500, 0, 255, 255);
-              this.cameras.main.once('camerafadeoutcomplete', () => {
-                  this.scene.start("WinScene", { bestDistance: best });
+              this.physics.pause();
+              
+              // Open Portal energy (fade out the sprite slightly or just have player pass it)
+              this.tweens.add({
+                  targets: this.finishPortal,
+                  alpha: 0.3,
+                  duration: 500
+              });
+
+              this.tweens.add({
+                  targets: this.playerVisual,
+                  x: GAME_WIDTH + 200,
+                  duration: 2000,
+                  ease: "Sine.easeIn",
+                  onComplete: () => {
+                      const best = saveBestDistance(this.distance);
+                      this.scene.start("WinScene", { bestDistance: best });
+                  }
               });
           });
       }
 
       failTerminal() {
           this.keypadLocked = true;
-          this.terminalActive = false;
+          this.countdownEvent.remove();
           this.terminalStatus.setText("SYSTEM COMPROMISED");
-          this.scene.start("DeathScene", { distance: this.distance, bestDistance: getBestDistance() });
+          this.terminalStatus.setColor("#ff0000");
+
+          this.time.delayedCall(1000, () => {
+              this.terminalElements.forEach(el => el.destroy());
+              this.terminalActive = false;
+              this.ending = true;
+              
+              // Randomly pick an elimination ending
+              if (Math.random() > 0.5) {
+                  this.endingSnipe();
+              } else {
+                  this.endingDissolve();
+              }
+          });
+      }
+
+      endingSnipe() {
+          // Player starts to run but gets sniped
+          this.tweens.add({
+              targets: this.playerVisual,
+              x: PLAYER_X + 150,
+              duration: 800,
+              ease: "Sine.easeOut",
+              onComplete: () => {
+                  // Red Laser from top right
+                  const laser = this.add.graphics().setDepth(1000);
+                  laser.lineStyle(2, 0xff0000, 1);
+                  laser.beginPath();
+                  laser.moveTo(GAME_WIDTH, 0);
+                  laser.lineTo(this.playerVisual.x, this.playerVisual.y - 20);
+                  laser.strokePath();
+                  
+                  this.cameras.main.flash(50, 255, 255, 255);
+                  if (this.cache.audio.exists('sfx_kill')) this.sound.play('sfx_kill');
+                  
+                  this.cameras.main.shake(200, 0.02);
+                  
+                  this.time.delayedCall(100, () => {
+                      laser.destroy();
+                      // Digital glitch out
+                      this.tweens.add({
+                          targets: this.playerVisual,
+                          alpha: 0,
+                          scale: 0.5,
+                          duration: 400,
+                          onComplete: () => {
+                              this.scene.start("DeathScene", { distance: this.distance, bestDistance: getBestDistance() });
+                          }
+                      });
+                  });
+              }
+          });
+      }
+
+      endingDissolve() {
+          // Player starts to run but dissolves into particles
+          this.tweens.add({
+              targets: this.playerVisual,
+              x: PLAYER_X + 100,
+              duration: 500,
+              ease: "Sine.easeOut",
+              onComplete: () => {
+                  if (this.cache.audio.exists('sfx_sabotage')) this.sound.play('sfx_sabotage');
+                  
+                  // Intense Digital Dissolve Effect
+                  this.cameras.main.shake(500, 0.01);
+                  
+                  const particles = this.add.particles(0, 0, 'confetti_piece', {
+                      x: this.playerVisual.x,
+                      y: this.playerVisual.y - 30,
+                      speed: { min: 100, max: 400 },
+                      angle: { min: 0, max: 360 },
+                      scale: { start: 2, end: 0 },
+                      alpha: { start: 1, end: 0 },
+                      tint: 0x00ffff,
+                      lifespan: 1000,
+                      blendMode: 'ADD',
+                      quantity: 40
+                  });
+                  particles.setDepth(1000);
+                  particles.explode();
+
+                  this.tweens.add({
+                      targets: this.playerVisual,
+                      scaleX: 3,
+                      scaleY: 0,
+                      alpha: 0,
+                      duration: 300,
+                      onComplete: () => {
+                          this.time.delayedCall(1000, () => {
+                              this.scene.start("DeathScene", { distance: this.distance, bestDistance: getBestDistance() });
+                          });
+                      }
+                  });
+              }
+          });
       }
     }
     class DeathScene extends Phaser.Scene {
