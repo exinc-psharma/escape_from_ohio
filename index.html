@@ -373,21 +373,36 @@
             fontFamily: "Orbitron, sans-serif", fontSize: "10px", color: "#ffff00"
         }).setOrigin(1, 1).setDepth(2000);
 
+        // --- EMERGENCY OVERRIDE BUTTON ---
+        this.muteToggle = this.add.text(GAME_WIDTH - 20, 20, "🔊", {
+            fontSize: "32px"
+        }).setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(2000);
+
         const tryResumeAudio = () => {
+            // Force reset volume/mute state
+            this.sound.setMute(false);
+            this.sound.setVolume(1);
+            
             if (this.sound.context.state !== 'running') {
-                this.sound.context.resume().then(() => {
-                    console.log("AudioContext Resumed Successfully");
-                });
+                this.sound.context.resume();
             }
             
             if (this.cache.audio.exists('music_drip')) {
                 let m = this.sound.get('music_drip');
-                if (!m) m = this.sound.add('music_drip', { loop: true, volume: 0.4 });
+                if (!m) m = this.sound.add('music_drip', { loop: true, volume: 0.5 });
                 if (m && !m.isPlaying) {
                     m.play();
                 }
             }
+
+            // Play test sound
+            if (this.cache.audio.exists('sfx_alert')) {
+                this.sound.play('sfx_alert', { volume: 0.8 });
+            }
         };
+
+        this.muteToggle.on('pointerdown', tryResumeAudio);
+
 
         // Aggressive mapping: Listen for ANY interaction to force the context open
         this.input.on('pointerdown', tryResumeAudio);
@@ -478,11 +493,14 @@
         }
 
         // Keep status monitor updated
+        const mStatus = this.sound.mute ? "MUTED" : "UNMUTED";
+        const vStatus = Math.round(this.sound.volume * 100);
+        
         if (this.sound.context.state === 'running') {
-            this.audioStatusText.setText("AUDIO SYSTEM: ACTIVE");
+            this.audioStatusText.setText(`AUDIO: ACTIVE | VOL: ${vStatus}% | ${mStatus}`);
             this.audioStatusText.setColor("#00ff00");
         } else {
-            this.audioStatusText.setText("AUDIO SYSTEM: BLOCKED (CLICK SCREEN)");
+            this.audioStatusText.setText("AUDIO: BLOCKED (CLICK SCREEN)");
             this.audioStatusText.setColor("#ff0000");
         }
       }
