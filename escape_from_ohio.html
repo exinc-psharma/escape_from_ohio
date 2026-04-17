@@ -367,68 +367,15 @@
       create() {
         this.cameras.main.setBackgroundColor("#050011");
         
-        // --- AGGRESSIVE AUDIO UNLOCKER (Itch.io/Iframe Fix) ---
-        this.audioStatusText = this.add.text(GAME_WIDTH - 10, GAME_HEIGHT - 10, "AUDIO SYSTEM: INITIALIZING", {
-            fontFamily: "Orbitron, sans-serif", fontSize: "10px", color: "#ffff00"
-        }).setOrigin(1, 1).setDepth(2000);
-
-        // --- EMERGENCY OVERRIDE BUTTONS ---
-        this.muteToggle = this.add.text(GAME_WIDTH - 20, 20, "🔊", {
-            fontSize: "32px"
-        }).setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(2000);
-
-        this.beepTest = this.add.text(GAME_WIDTH - 20, 70, "[ SYSTEM BEEP TEST ]", {
-            fontFamily: "Orbitron, sans-serif", fontSize: "12px", color: "#00ffff"
-        }).setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(2000);
-
-        const tryResumeAudio = () => {
-            this.sound.setMute(false);
-            this.sound.setVolume(1);
-            if (this.sound.context.state !== 'running') this.sound.context.resume();
-            
-            if (this.cache.audio.exists('music_drip')) {
-                let m = this.sound.get('music_drip');
-                if (!m) m = this.sound.add('music_drip', { loop: true, volume: 0.5 });
-                if (m && !m.isPlaying) m.play();
-            }
-            if (this.cache.audio.exists('sfx_alert')) {
-                this.sound.play('sfx_alert', { volume: 0.8 });
+        // --- FINAL AUDIO FIX ---
+        // Force the audio context to unlock on the first user interaction
+        const unlockAudio = () => {
+            if (this.sound.context.state === 'suspended') {
+                this.sound.context.resume();
             }
         };
-
-        const playDirectBeep = () => {
-            const ctx = this.sound.context;
-            if (ctx.state !== 'running') ctx.resume();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(440, ctx.currentTime);
-            gain.gain.setValueAtTime(0.1, ctx.currentTime);
-            osc.start();
-            osc.stop(ctx.currentTime + 0.3);
-        };
-
-        this.muteToggle.on('pointerdown', tryResumeAudio);
-        this.beepTest.on('pointerdown', playDirectBeep);
-
-        // Phaser 3 built-in unlock listener
-        this.sound.once('unlocked', () => {
-            console.log("Phaser Sound System Unlocked");
-        });
-
-
-
-
-        // --- ASSET DIAGNOSTICS ---
-        this.load.on('loaderror', (file) => {
-            console.error(`CRITICAL: Failed to load asset: ${file.src}`);
-            // Small on-screen alert for the developer
-            this.add.text(10, 10, "LOAD ERROR: CHECK CONSOLE", { fontSize: '12px', color: '#ff0000' }).setDepth(1000);
-        });
-
-
+        this.input.once('pointerdown', unlockAudio);
+        this.input.keyboard.once('keydown', unlockAudio);
 
         // Background decorative lines
         const g = this.add.graphics();
@@ -496,19 +443,6 @@
         if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
           this.startGame();
         }
-
-        // Keep status monitor updated
-        const mStatus = this.sound.mute ? "MUTED" : "UNMUTED";
-        const vStatus = Math.round(this.sound.volume * 100);
-        const hwStatus = (this.sound.context && this.sound.context.state === 'running') ? "HW:ON" : "HW:OFF";
-        
-        if (this.sound.context.state === 'running') {
-            this.audioStatusText.setText(`AUDIO: ACTIVE | ${hwStatus} | VOL: ${vStatus}% | ${mStatus}`);
-            this.audioStatusText.setColor("#00ff00");
-        } else {
-            this.audioStatusText.setText("AUDIO: BLOCKED (CLICK SCREEN)");
-            this.audioStatusText.setColor("#ff0000");
-        }
       }
     }
 
@@ -521,13 +455,7 @@
       }
 
       preload() {
-        // Redundant preloads are ignored by Phaser but ensure assets are ready
-        this.load.audio('music_drip', 'assets/sounds/music_drip.mp3');
-        this.load.audio('sfx_meeting', 'assets/sounds/sfx_meeting.mp3');
-        this.load.audio('sfx_kill', 'assets/sounds/sfx_kill.mp3');
-        this.load.audio('sfx_victory', 'assets/sounds/sfx_victory.mp3');
-        this.load.audio('sfx_alert', 'assets/sounds/sfx_alert.mp3');
-        this.load.audio('sfx_sabotage', 'assets/sounds/sfx_sabotage.mp3');
+        // Unified preloading handled in MenuScene
       }
 
       create() {
@@ -1534,7 +1462,7 @@
       }
 
       preload() {
-        this.load.audio('music_drip', 'assets/sounds/music_drip.mp3');
+        // Assets preloaded in MenuScene
       }
 
       create(data) {
@@ -1622,10 +1550,7 @@
       }
 
       preload() {
-        this.load.audio('music_drip', 'assets/sounds/music_drip.mp3');
-        this.load.audio('sfx_victory', 'assets/sounds/sfx_victory.mp3');
-
-        // Internal texture for realistic confetti strips
+        // Assets preloaded in MenuScene
         if (!this.textures.exists('confetti_piece')) {
           const g = this.make.graphics({ x: 0, y: 0, add: false });
           g.fillStyle(0xffffff, 1);
