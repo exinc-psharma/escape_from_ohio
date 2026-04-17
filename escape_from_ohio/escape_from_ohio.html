@@ -1,0 +1,1158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Escape from Ohio: Cyber Edition</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #000;
+      font-family: 'Orbitron', monospace;
+    }
+
+    #game-container {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    canvas {
+      display: block;
+      image-rendering: auto; 
+    }
+
+    #runtime-error {
+      position: fixed;
+      left: 10px;
+      bottom: 10px;
+      max-width: calc(100vw - 20px);
+      padding: 8px 10px;
+      font: 14px monospace;
+      color: #fff;
+      background: rgba(180, 0, 0, 0.9);
+      border: 1px solid #ff8080;
+      display: none;
+      z-index: 9999;
+      white-space: pre-wrap;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container"></div>
+  <div id="runtime-error"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js" crossorigin="anonymous"></script>
+  <script>
+    // ------------------------------------------------------------
+    // Constants
+    // ------------------------------------------------------------
+    const GAME_WIDTH = 800;
+    const GAME_HEIGHT = 600;
+    const GROUND_TOP = GAME_HEIGHT * 0.85;
+    const PLAYER_X = GAME_WIDTH * 0.15;
+    const TARGET_DISTANCE = 5000; // 5 kilometres
+    const SAVE_KEY = "escape_from_ohio_best_metres";
+
+    // Runtime error helper
+    window.addEventListener("error", (event) => {
+      const box = document.getElementById("runtime-error");
+      if (box) {
+        box.style.display = "block";
+        box.textContent = "Runtime error:\n" + (event.error && event.error.stack ? event.error.stack : event.message);
+      }
+    });
+
+    function getBestDistance() {
+      try {
+        const v = Number(localStorage.getItem(SAVE_KEY));
+        if (Number.isFinite(v) && v >= 0) return v;
+      } catch (_e) {}
+      return 0;
+    }
+
+    function saveBestDistance(currentDistance) {
+      const best = getBestDistance();
+      const next = Math.max(best, currentDistance);
+      try {
+        localStorage.setItem(SAVE_KEY, String(next));
+      } catch (_e) {}
+      return next;
+    }
+
+    function bindMenuInput(scene, startFn) {
+      const spaceKey = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+      scene.input.on("pointerdown", startFn);
+
+      const zone = scene.add.zone(0, 0, GAME_WIDTH, GAME_HEIGHT).setOrigin(0).setInteractive();
+      zone.on("pointerdown", startFn);
+
+      const domHandler = (e) => {
+        if (e.code === "Space" || e.key === " ") {
+          e.preventDefault();
+          startFn();
+        }
+      };
+      window.addEventListener("keydown", domHandler, { passive: false });
+
+      scene.events.once("shutdown", () => {
+        scene.input.off("pointerdown", startFn);
+        zone.destroy();
+        window.removeEventListener("keydown", domHandler);
+      });
+
+      return spaceKey;
+    }
+
+    // ------------------------------------------------------------
+    // Procedural Synthwave/Cyber Textures
+    // ------------------------------------------------------------
+    function createSharedTextures(scene) {
+      const g = scene.make.graphics({ x: 0, y: 0, add: false });
+
+      // Far City Silhouette
+      if (!scene.textures.exists("farCityTex")) {
+        g.clear();
+        for(let i=0; i<30; i++) {
+          let w = Phaser.Math.Between(40, 90);
+          let h = Phaser.Math.Between(60, 160);
+          let x = i * 40;
+          g.fillStyle(0x110022, 1);
+          g.fillRect(x, 200 - h, w, h);
+          // Windows
+          g.fillStyle(0x00ffff, 0.2);
+          for(let wy=200-h+10; wy<190; wy+=12) {
+             for(let wx=x+5; wx<x+w-5; wx+=8) {
+                if(Math.random()>0.8) g.fillRect(wx, wy, 3, 6);
+             }
+          }
+        }
+        g.generateTexture("farCityTex", 1200, 200);
+      }
+
+      // Mid City glowing lines
+      if (!scene.textures.exists("midCityTex")) {
+        g.clear();
+        for(let i=0; i<30; i++) {
+          let w = Phaser.Math.Between(60, 150);
+          let h = Phaser.Math.Between(100, 240);
+          let x = i * 70;
+          g.fillStyle(0x0a001a, 1);
+          g.fillRect(x, 250 - h, w, h);
+          g.lineStyle(2, 0xff00aa, 0.4);
+          g.strokeRect(x, 250 - h, w, h);
+        }
+        g.generateTexture("midCityTex", 2100, 250);
+      }
+
+      // Synth Grid Map
+      if (!scene.textures.exists("synthGridTex")) {
+        g.clear();
+        g.lineStyle(3, 0x00ffff, 0.4);
+        g.strokeRect(0, 0, 100, 100);
+        g.generateTexture("synthGridTex", 100, 100);
+      }
+
+      // Obstacle 1: Sus Vent
+      if (!scene.textures.exists("obsVent")) {
+        g.clear();
+        g.fillStyle(0x333333, 1);
+        g.fillRect(5, 50, 70, 10);
+        g.lineStyle(2, 0xaaaaaa, 1);
+        g.strokeRect(5, 50, 70, 10);
+        g.fillStyle(0x555555, 1);
+        g.fillRect(10, 10, 10, 40);
+        g.strokeRect(10, 10, 10, 40);
+        // Red glowing vent grating eyes
+        g.fillStyle(0xff0000, 1);
+        g.fillRect(30, 52, 6, 6);
+        g.fillRect(45, 52, 6, 6);
+        g.generateTexture("obsVent", 80, 60);
+      }
+
+      // Obstacle 2: Spicy Wires
+      if (!scene.textures.exists("obsWires")) {
+        g.clear();
+        g.lineStyle(4, 0xff0044, 1);
+        g.beginPath(); g.moveTo(10,0); g.lineTo(30, 40); g.strokePath();
+        g.lineStyle(4, 0x00ffff, 1);
+        g.beginPath(); g.moveTo(30,0); g.lineTo(15, 60); g.strokePath();
+        g.lineStyle(4, 0xffff00, 1);
+        g.beginPath(); g.moveTo(50,0); g.lineTo(40, 50); g.strokePath();
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(15, 60, 5); // spark
+        g.generateTexture("obsWires", 60, 80);
+      }
+
+      // Obstacle 3: Ejected Trash
+      if (!scene.textures.exists("obsTrash")) {
+        g.clear();
+        g.fillStyle(0x443322, 1);
+        g.fillRect(20, 30, 40, 40); 
+        g.lineStyle(2, 0xaa8800, 1);
+        g.strokeRect(20, 30, 40, 40);
+        g.fillStyle(0x888888, 1);
+        g.fillCircle(15, 60, 15); 
+        g.fillStyle(0x44aa44, 1);
+        g.fillRect(50, 20, 15, 35); 
+        g.generateTexture("obsTrash", 80, 80);
+      }
+
+      // Obstacle 4: Sus Drone
+      if (!scene.textures.exists("obsSus")) {
+        g.clear();
+        g.fillStyle(0xff0033, 1);
+        g.fillRoundedRect(10, 10, 30, 45, 15);
+        g.fillStyle(0x990011, 1);
+        g.fillRoundedRect(0, 15, 15, 25, 5);
+        g.fillStyle(0x00ffff, 1);
+        g.fillRoundedRect(18, 18, 22, 12, 6);
+        g.fillStyle(0xffffff, 1);
+        g.fillRect(32, 20, 4, 4);
+        g.fillStyle(0xffaa00, 1);
+        g.fillTriangle(15, 55, 35, 55, 25, 70);
+        g.generateTexture("obsSus", 50, 75);
+      }
+
+      g.destroy();
+    }
+
+    // ------------------------------------------------------------
+    // Menu Scene
+    // ------------------------------------------------------------
+    class MenuScene extends Phaser.Scene {
+      constructor() {
+        super("MenuScene");
+      }
+
+      preload() {
+        this.load.audio('music_drip', 'assets/sounds/music_drip.mp3');
+        this.load.audio('sfx_meeting', 'assets/sounds/sfx_meeting.mp3');
+        this.load.audio('sfx_kill', 'assets/sounds/sfx_kill.mp3');
+        this.load.audio('sfx_victory', 'assets/sounds/sfx_victory.mp3');
+        this.load.audio('sfx_alert', 'assets/sounds/sfx_alert.mp3');
+        this.load.audio('sfx_sabotage', 'assets/sounds/sfx_sabotage.mp3');
+      }
+
+      create() {
+        this.cameras.main.setBackgroundColor("#050011");
+        
+        // Start Background Music (Looped) - Safe check for local file restrictions
+        try {
+            let bgm = this.sound.get('music_drip');
+            if (!bgm) {
+                bgm = this.sound.add('music_drip', { loop: true, volume: 0.6 });
+            }
+            if (bgm && !bgm.isPlaying) {
+                bgm.play();
+            }
+        } catch (e) { console.warn("Audio Context blocked or file missing:", e); }
+
+        // Meeting Start Sound - Safe play
+        if (this.cache.audio.exists('sfx_meeting')) {
+            this.sound.play('sfx_meeting', { volume: 0.8 });
+        }
+
+        // Background decorative lines
+        const g = this.add.graphics();
+        g.lineStyle(2, 0xff00aa, 0.2);
+        for(let i=0; i<GAME_HEIGHT; i+=40) {
+           g.beginPath(); g.moveTo(0, i); g.lineTo(GAME_WIDTH, i); g.strokePath();
+        }
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.2, "ESCAPE FROM OHIO", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "64px",
+          fontStyle: "900",
+          color: "#00ffff"
+        }).setOrigin(0.5).setShadow(0, 0, "#00deff", 20, true, true);
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.32, "POLUS RUN: SUS EDITION", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "22px",
+          color: "#ff00aa"
+        }).setOrigin(0.5).setShadow(0, 0, "#ff00aa", 10, true, true);
+
+        // CLEARLY INDICATING THE GOAL
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.48, `🎯 TARGET: 5000 METRES`, {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "36px",
+          fontStyle: "700",
+          color: "#ffffff"
+        }).setOrigin(0.5).setShadow(0, 0, "#ffffff", 10, true, true);
+
+        const prompt = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.65, "[ PRESS SPACE OR TAP TO ENGAGE ]", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "26px",
+          fontStyle: "700",
+          color: "#ffcc00"
+        }).setOrigin(0.5);
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.8, `PREVIOUS BEST: ${getBestDistance().toFixed(1)} M`, {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "20px",
+          color: "#8888aa"
+        }).setOrigin(0.5);
+
+        this.tweens.add({
+          targets: prompt,
+          alpha: 0.1,
+          duration: 800,
+          yoyo: true,
+          repeat: -1
+        });
+
+        this.started = false;
+        this.startGame = () => {
+          if (this.started) return;
+          this.started = true;
+          this.cameras.main.fadeOut(300, 0, 0, 0);
+          this.cameras.main.once('camerafadeoutcomplete', () => {
+             this.scene.start("GameScene");
+          });
+        };
+
+        this.spaceKey = bindMenuInput(this, this.startGame);
+      }
+
+      update() {
+        if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+          this.startGame();
+        }
+      }
+    }
+
+    // ------------------------------------------------------------
+    // Game Scene
+    // ------------------------------------------------------------
+    class GameScene extends Phaser.Scene {
+      constructor() {
+        super("GameScene");
+      }
+
+      preload() {
+        // Redundant preloads are ignored by Phaser but ensure assets are ready
+        this.load.audio('music_drip', 'assets/sounds/music_drip.mp3');
+        this.load.audio('sfx_meeting', 'assets/sounds/sfx_meeting.mp3');
+        this.load.audio('sfx_kill', 'assets/sounds/sfx_kill.mp3');
+        this.load.audio('sfx_victory', 'assets/sounds/sfx_victory.mp3');
+        this.load.audio('sfx_alert', 'assets/sounds/sfx_alert.mp3');
+        this.load.audio('sfx_sabotage', 'assets/sounds/sfx_sabotage.mp3');
+      }
+
+      create() {
+        createSharedTextures(this);
+        
+        // --- 1. PREMIUM PARALLAX BACKGROUND ---
+        
+        // Deep purple to black gradient sky
+        let sky = this.add.graphics();
+        sky.fillGradientStyle(0x0a001a, 0x0a001a, 0x3d004a, 0x3d004a, 1, 1, 1, 1);
+        sky.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+        // Slow moving stars stream
+        this.stars = [];
+        let starTex = this.add.graphics();
+        starTex.fillStyle(0xffffff, 1);
+        starTex.fillCircle(2, 2, 2);
+        starTex.generateTexture('star', 4, 4);
+        starTex.destroy();
+
+        for(let i=0; i<80; i++) {
+          let s = this.add.image(Phaser.Math.Between(0, GAME_WIDTH), Phaser.Math.Between(0, GROUND_TOP-50), 'star').setDepth(0);
+          s.alpha = Phaser.Math.FloatBetween(0.2, 0.9);
+          s.scale = Phaser.Math.FloatBetween(0.4, 1.2);
+          s.speed = Phaser.Math.FloatBetween(1, 4);
+          this.stars.push(s);
+        }
+
+        // Retro Synthwave Sun
+        let sunGlow = this.add.circle(GAME_WIDTH/2, GROUND_TOP - 160, 160, 0xff0066, 0.4).setDepth(0);
+        let sun = this.add.circle(GAME_WIDTH/2, GROUND_TOP - 160, 140, 0xff0066).setDepth(0);
+        let sunCuts = this.add.graphics().setDepth(0);
+        sunCuts.fillStyle(0x3d004a, 1);
+        for(let i=0; i<12; i++) {
+           sunCuts.fillRect(0, GROUND_TOP - 100 + i*16, GAME_WIDTH, 3 + i*1.5);
+        }
+
+        // Layered Cities
+        this.farCity = this.add.tileSprite(GAME_WIDTH/2, GROUND_TOP - 100, GAME_WIDTH, 200, "farCityTex").setDepth(1);
+        this.midCity = this.add.tileSprite(GAME_WIDTH/2, GROUND_TOP - 125, GAME_WIDTH, 250, "midCityTex").setDepth(2);
+
+        // Synthwave Ground Floor
+        const floorHeight = GAME_HEIGHT - GROUND_TOP;
+        this.groundVisual = this.add.tileSprite(GAME_WIDTH/2, GROUND_TOP + floorHeight/2, GAME_WIDTH, floorHeight, "synthGridTex").setDepth(3);
+        this.groundVisual.setBlendMode('ADD');
+
+        // Dark fade overlay spanning top of the ground to add perspective depth
+        let fade = this.add.graphics().setDepth(4);
+        fade.fillGradientStyle(0x3d004a, 0x3d004a, 0x3d004a, 0x3d004a, 1, 1, 0, 0);
+        fade.fillRect(0, GROUND_TOP, GAME_WIDTH, 50);
+
+        // --- 2. PHYSICS & HUD ---
+        
+        // Physics ground (invisible)
+        this.ground = this.add.rectangle(GAME_WIDTH / 2, GROUND_TOP + 40, GAME_WIDTH, 80, 0x00ff00, 0);
+        this.physics.add.existing(this.ground, true);
+
+        // Player physics hitbox 
+        this.player = this.add.rectangle(PLAYER_X, GROUND_TOP - 40, 24, 80, 0xffffff, 0);
+        this.physics.add.existing(this.player);
+        this.playerBody = this.player.body;
+        this.playerBody.setGravityY(1800);
+        this.playerBody.setCollideWorldBounds(true);
+        this.playerBody.setSize(24, 80);
+        this.physics.add.collider(this.player, this.ground);
+
+        // --- 3. PREMIUM ANIMATED PLAYER SKELETON ---
+        
+        this.playerVisual = this.add.container(PLAYER_X, GROUND_TOP - 40).setDepth(20);
+        const pColor = 0xffffff;
+
+        const createPart = (cx, cy, w, h, colorMain, isBack) => {
+            let cont = this.add.container(cx, cy);
+            let vis = this.add.graphics();
+            let neonColor = isBack ? 0x008888 : 0x00ffff; // Back limbs are darker
+            
+            // Base shadow shape
+            vis.fillStyle(0x050505, 1);
+            vis.fillRoundedRect(-w/2, 0, w, h, w/3);
+            // Neon Glow aura
+            vis.lineStyle(6, neonColor, 0.4);
+            vis.strokeRoundedRect(-w/2, 0, w, h, w/3);
+            // Core hard line
+            vis.lineStyle(2, 0xffffff, 0.9);
+            vis.strokeRoundedRect(-w/2, 0, w, h, w/3);
+            // Internal conduit
+            vis.lineStyle(1, neonColor, 1);
+            vis.beginPath(); vis.moveTo(0, 4); vis.lineTo(0, h-4); vis.strokePath();
+
+            cont.add(vis);
+            return cont;
+        };
+
+        // Assemble hierarchy - sizes adjusted to fit tight 80px hitbox visually
+        this.bArm = createPart(0, -10, 8, 16, pColor, true); 
+        this.bArmLower = createPart(0, 14, 6, 16, pColor, true); 
+        this.bArm.add(this.bArmLower);
+
+        this.bLeg = createPart(0, 5, 10, 22, pColor, true); 
+        this.bLegLower = createPart(0, 20, 8, 22, pColor, true); 
+        this.bLeg.add(this.bLegLower);
+
+        this.torso = createPart(0, -15, 16, 26, pColor, false);
+
+        this.head = this.add.container(0, -25);
+        let hV = this.add.graphics();
+        hV.fillStyle(0x050505, 1); hV.fillCircle(0, 0, 10);
+        hV.lineStyle(4, 0x00ffff, 0.4); hV.strokeCircle(0, 0, 10); // glow
+        hV.lineStyle(2, 0xffffff, 0.9); hV.strokeCircle(0, 0, 10); // core
+        hV.fillStyle(0xff00aa, 1); hV.fillRect(1, -3, 8, 4); // sci-fi visor
+        this.head.add(hV);
+
+        this.fLeg = createPart(0, 5, 12, 22, pColor, false);
+        this.fLegLower = createPart(0, 20, 10, 22, pColor, false);
+        this.fLeg.add(this.fLegLower);
+
+        this.fArm = createPart(0, -10, 10, 16, pColor, false);
+        this.fArmLower = createPart(0, 14, 8, 16, pColor, false);
+        this.fArm.add(this.fArmLower);
+
+        this.playerVisual.add([this.bArm, this.bLeg, this.torso, this.head, this.fLeg, this.fArm]);
+
+        // --- 4. CINEMATIC UI ---
+        
+        let topBar = this.add.rectangle(GAME_WIDTH/2, 20, GAME_WIDTH, 40, 0x000000, 0.8).setDepth(100);
+        this.distance = 0;
+        this.distanceText = this.add.text(20, 20, "DIST: 0M", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "24px",
+          fontStyle: "900",
+          color: "#00ffff"
+        }).setDepth(101).setShadow(0, 0, "#00deff", 10, true, true);
+
+        // Progress Bar to 5000m
+        this.progressBorder = this.add.graphics().setDepth(100);
+        this.progressBorder.lineStyle(2, 0xffffff, 0.8);
+        this.progressBorder.strokeRect(GAME_WIDTH/2 - 100, 25, 200, 15);
+        this.progressBar = this.add.graphics().setDepth(100);
+        
+        this.speedText = this.add.text(GAME_WIDTH - 20, 20, "VELOCITY: 350 MPH", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "20px",
+          fontStyle: "700",
+          color: "#00ffff"
+        }).setOrigin(1, 0).setDepth(101).setShadow(0, 0, "#00deff", 10, true, true);
+        
+        // Relocated the extra info to bottom corners to unclutter sky
+        this.add.text(20, GAME_HEIGHT - 25, "SYSTEM: POLUS // AMONG US PROXY", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "14px",
+          color: "#ff00aa"
+        }).setOrigin(0, 0.5).setDepth(101);
+        
+        this.speedAlert = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.25, "⚠ OVERCLOCKING ⚠\nSPEED INCREASING!", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "26px",
+          fontStyle: "900",
+          color: "#ffaa00",
+          align: "center"
+        }).setOrigin(0.5).setAlpha(0).setDepth(105).setShadow(0, 0, "#ff4400", 20, true, true);
+
+        this.spawnAlert = this.add.text(GAME_WIDTH / 2, 110, "", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "24px",
+          fontStyle: "900",
+          color: "#ff0044"
+        }).setOrigin(0.5).setDepth(102).setAlpha(0).setShadow(0, 0, "#ff0044", 20, true, true);
+
+        // --- 5. OBSTACLES ---
+        
+        this.obstacleDefs = [
+          { key: "obsVent", name: "Sus Vent", label: "SABOTAGED VENT", color: "#ff4d4d", hitW: 60, hitH: 40, yOff: 0 },
+          { key: "obsWires", name: "Spicy Wires", label: "ELECTRICAL HAZARD", color: "#ffff00", hitW: 30, hitH: 70, yOff: 0 },
+          { key: "obsTrash", name: "Ejected Debris", label: "EJECTED GARBAGE", color: "#c47dff", hitW: 55, hitH: 55, yOff: -20 },
+          { key: "obsSus", name: "Impostor Drone", label: "IMPOSTOR DETECTED", color: "#ff0000", hitW: 30, hitH: 60, yOff: -60 }
+        ];
+
+        this.obstacleGroup = this.physics.add.group({
+          allowGravity: false,
+          immovable: true
+        });
+        this.obstacles = [];
+        this.physics.add.overlap(this.player, this.obstacleGroup, this.hitObstacle, null, this);
+
+        // Input Setup
+        this.jumpQueuedMs = 9999;
+        this.isSliding = false;
+        
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+        
+        // Mobile tap bridging (handled dynamically in update loop via activePointers, but we keep default block here)
+
+        this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+        this.spaceKey.on("down", () => { this.jumpQueuedMs = 0; });
+        this.domJump = (e) => {
+          if (e.code === "Space" || e.key === " " || e.code === "ArrowUp") {
+            e.preventDefault();
+            this.jumpQueuedMs = 0;
+          }
+          if (e.code === "ArrowDown") {
+            e.preventDefault(); // stop page scrolling natively
+          }
+        };
+        window.addEventListener("keydown", this.domJump, { passive: false });
+
+        this.events.once("shutdown", () => {
+          this.spaceKey.off("down");
+          window.removeEventListener("keydown", this.domJump);
+        });
+
+        // Gameplay state
+        this.runTimeMs = 0;
+        this.worldSpeed = 350;
+        this.currentSpeedTier = 0;
+        this.spawnProgressPx = 0;
+        this.nextSpawnGap = Phaser.Math.Between(800, 1100);
+        this.nextMilestone = 1000; // Notify per km
+        this.ending = false;
+      }
+
+      spawnObstacle() {
+        let maxCount = 1;
+        if (this.distance > 2500) maxCount = 3;
+        else if (this.distance > 1000) maxCount = 2;
+        
+        let patternRoll = Math.random();
+        let obsCount = 1;
+        if (maxCount === 2) {
+           obsCount = patternRoll > 0.4 ? 2 : 1; 
+        } else if (maxCount === 3) {
+           if (patternRoll > 0.6) obsCount = 3;
+           else if (patternRoll > 0.3) obsCount = 2;
+           else obsCount = 1;
+        }
+
+        let baseX = GAME_WIDTH + 150;
+        let curX = baseX;
+        let groupNames = [];
+
+        for(let i=0; i<obsCount; i++) {
+            let d;
+            
+            // Randomly force a slide if it's the second or third obstacle in a bunch
+            if (i > 0 && Math.random() > 0.5) {
+                d = this.obstacleDefs.find(x => x.key === "obsSus");
+            } else {
+                let jumps = this.obstacleDefs.filter(x => x.key !== "obsSus");
+                d = Phaser.Utils.Array.GetRandom(jumps);
+            }
+            
+            let finalYOff = d.yOff;
+            if (d.key === "obsSus") {
+                finalYOff = -60; 
+            } else if (d.key === "obsTrash") {
+                finalYOff = Phaser.Math.Between(-60, -10); 
+            }
+            
+            const y = GROUND_TOP + finalYOff;
+            const s = this.obstacleGroup.create(curX, y, d.key);
+            s.setOrigin(0.5, 1);
+            s.setDepth(15);
+            s.body.allowGravity = false;
+            s.body.immovable = true;
+            s.body.setSize(d.hitW, d.hitH);
+            s.body.setOffset((s.width - d.hitW) * 0.5, s.height - d.hitH);
+
+            const label = this.add.text(curX, y - s.displayHeight - 20, d.label, {
+              fontFamily: "Orbitron, sans-serif",
+              fontSize: "14px",
+              fontStyle: "700",
+              color: d.color
+            }).setOrigin(0.5, 1).setDepth(16).setShadow(0, 0, d.color, 10, true, true);
+
+            if (d.key === "obsTrash") {
+              this.tweens.add({ targets: s, angle: "+=360", duration: 800, repeat: -1, ease: "Linear" });
+            } else if (d.key === "obsWires") {
+              this.tweens.add({ targets: s, alpha: 0.5, duration: 80, yoyo: true, repeat: -1 }); 
+            } else if (d.key === "obsSus") {
+              this.tweens.add({ targets: s, y: y - 20, duration: 500, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+            }
+
+            this.obstacles.push({ sprite: s, label: label, name: d.name });
+            if(i === 0) groupNames.push(d.name); // only notify primary threat
+            
+            // Advance horizontal space for next obstacle in group
+            curX += Phaser.Math.Between(450, 600); 
+        }
+
+        this.showSpawnAlert(groupNames[0] + (obsCount > 1 ? " GROUP" : ""));
+        if (this.cache.audio.exists('sfx_alert')) {
+            this.sound.play('sfx_alert', { volume: 0.5 });
+        }
+        
+        return curX - baseX;
+      }
+
+      showSpawnAlert(name) {
+        this.spawnAlert.setText(`⚠ WARNING: ${name.toUpperCase()} APPROACHING`);
+        this.spawnAlert.setAlpha(1);
+        this.tweens.killTweensOf(this.spawnAlert);
+        this.tweens.add({
+          targets: this.spawnAlert,
+          alpha: 0,
+          y: 70,
+          duration: 1800,
+          ease: "Cubic.easeOut"
+        });
+      }
+
+      showMilestone() {
+        const t = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.35, `SYSTEM SYNC: ${this.distance.toFixed(0)} M`, {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "44px",
+          fontStyle: "900",
+          color: "#ff00aa"
+        }).setOrigin(0.5).setDepth(105).setShadow(0, 0, "#ff00aa", 25, true, true);
+
+        this.tweens.add({
+          targets: t,
+          y: GAME_HEIGHT * 0.25,
+          alpha: 0,
+          scale: 1.2,
+          duration: 1500,
+          ease: "Quad.easeOut",
+          onComplete: () => t.destroy()
+        });
+      }
+
+      hitObstacle() {
+        if (this.ending) return;
+        this.ending = true;
+        this.physics.pause();
+        this.cameras.main.flash(400, 255, 0, 0);
+        this.cameras.main.shake(500, 0.03);
+        if (this.cache.audio.exists('sfx_kill')) {
+            this.sound.play('sfx_kill'); 
+        }
+        const best = saveBestDistance(this.distance);
+        
+        // Break limbs apart for visual death
+        this.playerVisual.each(part => {
+             this.tweens.add({
+                 targets: part,
+                 x: Phaser.Math.Between(-50, 50),
+                 y: Phaser.Math.Between(-50, 50),
+                 angle: Phaser.Math.Between(-180, 180),
+                 alpha: 0.2,
+                 duration: 700
+             });
+        });
+
+        this.time.delayedCall(1000, () => {
+          this.scene.start("DeathScene", { distance: this.distance, bestDistance: best });
+        });
+      }
+
+      update(_t, delta) {
+        if (this.ending) {
+          // death animation updates bounds automatically
+          return;
+        }
+
+        const dt = delta / 1000;
+        this.runTimeMs += delta;
+        
+        let newTier = Math.floor(this.runTimeMs / 6000);
+        if (newTier > this.currentSpeedTier && this.worldSpeed < 1000) {
+            this.currentSpeedTier = newTier;
+            
+            // Flash speed alert
+            this.speedAlert.setAlpha(1);
+            this.speedAlert.setScale(1);
+            this.tweens.killTweensOf(this.speedAlert);
+            this.tweens.add({
+              targets: this.speedAlert,
+              alpha: 0,
+              scale: 1.1,
+              duration: 2500,
+              ease: "Sine.easeOut"
+            });
+            this.cameras.main.shake(200, 0.002);
+            
+            // Sabotage alarm for 1.5 seconds - Safe Play
+            if (this.cache.audio.exists('sfx_sabotage')) {
+                let sabot = this.sound.add('sfx_sabotage', { volume: 0.7 });
+                sabot.play();
+                this.time.delayedCall(1500, () => {
+                    if(sabot) sabot.stop();
+                });
+            }
+        }
+        
+        // Dynamic game flow - gets intensely fast towards 5km
+        this.worldSpeed = Math.min(1000, 350 + newTier * 25);
+        this.speedText.setText(`SPEED: ${this.worldSpeed} MPH`);
+
+        // Physics logic bounds
+        const grounded = this.playerBody.blocked.down || this.playerBody.touching.down;
+        this.jumpQueuedMs += delta;
+
+        // Touch Input bridging
+        let touchSlide = false;
+        if (this.input.activePointer.isDown) {
+            if (this.input.activePointer.x < GAME_WIDTH / 2) {
+                touchSlide = true; // Left side of screen triggers slide
+            } else if (this.jumpQueuedMs > 300) {
+                this.jumpQueuedMs = 0; // Right side triggers jump
+            }
+        }
+
+        if (this.jumpQueuedMs <= 150 && grounded && !this.isSliding) {
+          this.playerBody.setVelocityY(-760); // Jump arc adjusted for the taller body height
+          this.jumpQueuedMs = 9999;
+          
+          let poof = this.add.circle(this.player.x, GROUND_TOP, 15, 0x00ffff, 0.5).setDepth(21);
+          this.tweens.add({targets: poof, scale: 3, alpha: 0, duration: 300, onComplete:()=>poof.destroy()});
+        }
+
+        // Sliding State toggle
+        const wantsToSlide = touchSlide || this.cursors.down.isDown || this.keyS.isDown;
+        if (wantsToSlide && grounded) {
+            if (!this.isSliding) {
+                this.isSliding = true;
+                this.playerBody.setSize(24, 40);
+                this.player.y += 20; // push geometry box down to maintain floor constraint
+            }
+        } else {
+            if (this.isSliding) {
+                this.isSliding = false;
+                this.playerBody.setSize(24, 80);
+                this.player.y -= 20; // restore upright geometry 
+            }
+        }
+
+        // Lock X position
+        this.player.x = PLAYER_X; 
+        this.playerBody.velocity.x = 0;
+
+        // Sync Container position precisely
+        if (this.isSliding) {
+           this.playerVisual.setPosition(this.player.x, this.player.y - 12); // visually lowered shift
+        } else {
+           this.playerVisual.setPosition(this.player.x, this.player.y - 9);
+        }
+
+        // ---- SKELETAL SINE WAVE ANIMATION LOGIC ---- 
+        const speedFactor = this.worldSpeed / 300;
+        const t = this.runTimeMs * 0.012 * speedFactor;
+        
+        if (this.isSliding) {
+            // Action Crouch/Slide Pose
+            this.playerVisual.angle = 20; // Lean forward athletically
+            
+            this.fLeg.angle = -70;
+            this.fLegLower.angle = 130; // Front knee high/bent
+            this.bLeg.angle = 40;
+            this.bLegLower.angle = 20; // Back knee low/trailing
+            this.fArm.angle = 80;
+            this.fArmLower.angle = -40; // Arm swept backward
+            this.bArm.angle = -120;
+            this.bArmLower.angle = 0; // Arm reaching forward
+            this.torso.y = -10;
+            this.head.y = -20;
+            
+            // Generate friction sparks from sliding feet
+            if (Math.random() > 0.4) {
+                let spark = this.add.circle(this.player.x + 10, GROUND_TOP - 2, 2.5, 0x00ffff).setDepth(21);
+                this.tweens.add({targets:spark, y:"-=15", x:"-=25", alpha:0, duration:300, onComplete:()=>spark.destroy()});
+            }
+        } else if (grounded) {
+            // Running Cycle
+            const s1 = Math.sin(t);
+            const c1 = Math.cos(t);
+            // Legs swing
+            this.fLeg.angle = s1 * 40;
+            this.fLegLower.angle = Math.max(0, -s1 * 50 + 25);
+            this.bLeg.angle = -s1 * 40;
+            this.bLegLower.angle = Math.max(0, s1 * 50 + 25);
+            // Arms swing opposingly
+            this.fArm.angle = -s1 * 45;
+            this.fArmLower.angle = Math.max(-100, -50 + s1 * 40);
+            this.bArm.angle = s1 * 45;
+            this.bArmLower.angle = Math.max(-100, -50 - s1 * 40);
+            
+            // Core breathing / bobbing
+            this.torso.y = -15 + Math.abs(c1) * 6;
+            this.head.y = -25 + Math.abs(c1) * 6;
+            this.playerVisual.angle = 12; // Athletic forward lean
+        } else {
+            // Airborne Pose
+            this.fLeg.angle = -35;
+            this.fLegLower.angle = 80;
+            this.bLeg.angle = 20;
+            this.bLegLower.angle = 10;
+            this.fArm.angle = -110;
+            this.fArmLower.angle = -20;
+            this.bArm.angle = 60;
+            this.bArmLower.angle = -30;
+            this.torso.y = -15;
+            this.head.y = -25;
+            this.playerVisual.angle = 0; // Straighten up
+        }
+
+        // Environment Scroll
+        // Starfield panning
+        for(let s of this.stars) {
+           s.x -= s.speed * dt * this.worldSpeed * 0.04;
+           if(s.x < -10) { s.x = GAME_WIDTH + 10; s.y = Phaser.Math.Between(0, GROUND_TOP-50); }
+        }
+        this.farCity.tilePositionX += this.worldSpeed * dt * 0.15;
+        this.midCity.tilePositionX += this.worldSpeed * dt * 0.4;
+        this.groundVisual.tilePositionX += this.worldSpeed * dt * 1.2;
+
+        // Distance & UI processing
+        const travelPx = this.worldSpeed * dt;
+        this.distance += travelPx / 10;
+        if (this.distance > TARGET_DISTANCE) this.distance = TARGET_DISTANCE;
+        
+        this.distanceText.setText(`DIST: ${this.distance.toFixed(1)} M`);
+        
+        // Clean responsive progress bar rendering
+        const fillW = 196 * Phaser.Math.Clamp(this.distance / TARGET_DISTANCE, 0, 1);
+        this.progressBar.clear();
+        this.progressBar.fillStyle(this.distance > TARGET_DISTANCE * 0.8 ? 0xff00aa : 0x00ffff, 0.9);
+        this.progressBar.fillRect((GAME_WIDTH/2 - 100) + 2, 27, fillW, 11);
+
+        // Milestones
+        if (this.distance >= this.nextMilestone && this.nextMilestone <= TARGET_DISTANCE) {
+          this.showMilestone();
+          this.nextMilestone += 1000;
+        }
+
+        if (this.distance >= TARGET_DISTANCE) {
+          this.ending = true;
+          const best = saveBestDistance(this.distance);
+          this.scene.start("WinScene", { bestDistance: best });
+          return;
+        }
+
+        // Obstacle Spawner
+        this.spawnProgressPx += travelPx;
+        if (this.spawnProgressPx >= this.nextSpawnGap) {
+          let spannedWidth = this.spawnObstacle();
+          this.spawnProgressPx = 0;
+          // As speed increases, randomize gaps tightly
+          let minGap = 500 + (this.worldSpeed * 0.5);
+          let maxGap = 1100 + (this.worldSpeed * 1.5);
+          this.nextSpawnGap = spannedWidth + Phaser.Math.Between(minGap, maxGap);
+        }
+
+        // Obstacle Management
+        for (let i = this.obstacles.length - 1; i >= 0; i--) {
+          const o = this.obstacles[i];
+          o.sprite.x -= travelPx;
+          o.label.x = o.sprite.x;
+          
+          if (o.sprite.body) {
+            o.sprite.body.reset(o.sprite.x, o.sprite.y);
+          }
+          
+          // Random premium trail sparks on obstacles
+          if(Math.random() > 0.7) {
+             let trail = this.add.circle(o.sprite.x + Phaser.Math.Between(-20, 20), o.sprite.y - Phaser.Math.Between(10, o.sprite.displayHeight), 2, 0x00ffff).setDepth(20);
+             this.tweens.add({targets:trail, alpha:0, y:"-=30", duration:400, onComplete:()=>trail.destroy()});
+          }
+
+          if (o.sprite.x < -150) {
+            o.label.destroy();
+            o.sprite.destroy();
+            this.obstacles.splice(i, 1);
+          }
+        }
+      }
+    }
+
+    // ------------------------------------------------------------
+    // Death Scene
+    // ------------------------------------------------------------
+    class DeathScene extends Phaser.Scene {
+      constructor() {
+        super("DeathScene");
+      }
+
+      preload() {
+        this.load.audio('music_drip', 'assets/sounds/music_drip.mp3');
+      }
+
+      create(data) {
+        this.cameras.main.setBackgroundColor("#110005");
+        const dist = data && typeof data.distance === "number" ? data.distance : 0;
+        const best = data && typeof data.bestDistance === "number" ? data.bestDistance : getBestDistance();
+
+        // Warning scanlines 
+        for(let i=0; i<GAME_HEIGHT; i+=8) {
+            this.add.rectangle(GAME_WIDTH/2, i, GAME_WIDTH, 2, 0xff0000, 0.05);
+        }
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.28, "SYSTEM OVERRIDE", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "68px",
+          fontStyle: "900",
+          color: "#ff0033"
+        }).setOrigin(0.5).setShadow(0, 0, "#ff0000", 25, true, true);
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.42, `CONNECTION LOST AT: ${dist.toFixed(1)} M`, {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "28px",
+          color: "#ffffff"
+        }).setOrigin(0.5);
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.50, `MAX RANGE DOCUMENTED: ${best.toFixed(1)} M`, {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "20px",
+          color: "#999999"
+        }).setOrigin(0.5);
+
+        const lines = [
+          "YOU HAVE BEEN ASSIMILATED INTO OHIO.",
+          "INSUFFICIENT EVASION VELOCITY.",
+          "ANOMALY HAS OVERTAKEN THE HOST.",
+          "CRITICAL EXISTENCE FAILURE."
+        ];
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.65, Phaser.Utils.Array.GetRandom(lines), {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "24px",
+          fontStyle: "700",
+          color: "#ff00aa"
+        }).setOrigin(0.5).setShadow(0, 0, "#ff00aa", 10, true, true);
+
+        const prompt = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.82, "[ PRESS SPACE TO REBOOT SEQUENCE ]", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "24px",
+          fontStyle: "900",
+          color: "#ffffff"
+        }).setOrigin(0.5);
+
+        this.tweens.add({
+          targets: prompt,
+          alpha: 0.1,
+          duration: 500,
+          yoyo: true,
+          repeat: -1
+        });
+
+        this.started = false;
+        this.retry = () => {
+          if (this.started) return;
+          this.started = true;
+          this.cameras.main.fadeOut(200, 0, 0, 0);
+          this.cameras.main.once('camerafadeoutcomplete', () => {
+              this.scene.start("GameScene");
+          });
+        };
+        this.spaceKey = bindMenuInput(this, this.retry);
+      }
+
+      update() {
+        if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+          this.retry();
+        }
+      }
+    }
+
+    // ------------------------------------------------------------
+    // Win Scene
+    // ------------------------------------------------------------
+    class WinScene extends Phaser.Scene {
+      constructor() {
+        super("WinScene");
+      }
+
+      preload() {
+        this.load.audio('music_drip', 'assets/sounds/music_drip.mp3');
+        this.load.audio('sfx_victory', 'assets/sounds/sfx_victory.mp3');
+      }
+
+      create(data) {
+        this.cameras.main.setBackgroundColor("#020515");
+        
+        // Stop background music and play victory theme - Safe Toggle
+        const bgm = this.sound.get('music_drip');
+        if (bgm) bgm.stop();
+        
+        if (this.cache.audio.exists('sfx_victory')) {
+            this.sound.play('sfx_victory');
+        }
+        
+        const best = data && typeof data.bestDistance === "number" ? data.bestDistance : getBestDistance();
+
+        // Euphoric victory particles!
+        this.confettiTimer = this.time.addEvent({
+          delay: 40,
+          loop: true,
+          callback: () => {
+            const x = Phaser.Math.Between(0, GAME_WIDTH);
+            const r = Phaser.Math.Between(3, 8);
+            const color = Phaser.Math.RND.pick([0x00ffff, 0xff00aa, 0xffeb62, 0xffffff]);
+            const dot = this.add.circle(x, -10, r, color);
+            const dotGlow = this.add.circle(x, -10, r * 2.5, color, 0.4);
+            const tx = x + Phaser.Math.Between(-150, 150);
+            const ty = GAME_HEIGHT + 30;
+            const dur = Phaser.Math.Between(2000, 4000);
+            const ang = Phaser.Math.Between(-180, 180);
+            
+            this.tweens.add({
+              targets: [dot, dotGlow],
+              x: tx,
+              y: ty,
+              alpha: { from: 1, to: 0 },
+              angle: ang,
+              duration: dur,
+              ease: "Sine.easeInOut",
+              onComplete: () => { dot.destroy(); dotGlow.destroy(); }
+            });
+          }
+        });
+
+        this.events.once("shutdown", () => {
+          if (this.confettiTimer) this.confettiTimer.remove(false);
+        });
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.3, "OHIO BREACHED", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "76px",
+          fontStyle: "900",
+          color: "#00ffff"
+        }).setOrigin(0.5).setShadow(0, 0, "#00deff", 25, true, true);
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.45, `FINAL METRIC: 5000 M (5 KM MAX)`, {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "30px",
+          fontStyle: "700",
+          color: "#ffffff"
+        }).setOrigin(0.5);
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.55, "YOU HAVE RETURNED TO REALITY.", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "24px",
+          color: "#ff00aa"
+        }).setOrigin(0.5).setShadow(0, 0, "#ff00aa", 10, true, true);
+
+        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.65, `SYSTEM ARCHIVE RECORD: ${best.toFixed(1)} M`, {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "20px",
+          color: "#aaaaaa"
+        }).setOrigin(0.5);
+
+        const prompt = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.82, "[ PRESS SPACE TO INITIATE NEW RUN ]", {
+          fontFamily: "Orbitron, sans-serif",
+          fontSize: "24px",
+          fontStyle: "900",
+          color: "#ffffff"
+        }).setOrigin(0.5);
+
+        this.tweens.add({
+          targets: prompt,
+          alpha: 0.1,
+          duration: 600,
+          yoyo: true,
+          repeat: -1
+        });
+
+        this.started = false;
+        this.playAgain = () => {
+          if (this.started) return;
+          this.started = true;
+          this.cameras.main.fadeOut(300, 0, 0, 0);
+          this.cameras.main.once('camerafadeoutcomplete', () => {
+              this.scene.start("GameScene");
+          });
+        };
+        this.spaceKey = bindMenuInput(this, this.playAgain);
+      }
+
+      update() {
+        if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+          this.playAgain();
+        }
+      }
+    }
+
+    // ------------------------------------------------------------
+    // Game boot
+    // ------------------------------------------------------------
+    const config = {
+      type: Phaser.AUTO,
+      parent: "game-container",
+      width: GAME_WIDTH,
+      height: GAME_HEIGHT,
+      backgroundColor: "#000000",
+      physics: {
+        default: "arcade",
+        arcade: {
+          gravity: { y: 0 },
+          debug: false
+        }
+      },
+      scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        width: GAME_WIDTH,
+        height: GAME_HEIGHT
+      },
+      scene: [MenuScene, GameScene, DeathScene, WinScene]
+    };
+
+    new Phaser.Game(config);
+  </script>
+</body>
+</html>
