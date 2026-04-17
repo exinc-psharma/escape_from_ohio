@@ -367,30 +367,8 @@
       create() {
         this.cameras.main.setBackgroundColor("#050011");
         
-        // Start Background Music (Looped) - Safe check for local file restrictions
-        try {
-            let bgm = this.sound.get('music_drip');
-            if (!bgm) {
-                bgm = this.sound.add('music_drip', { loop: true, volume: 0.6 });
-            }
-            if (bgm && !bgm.isPlaying) {
-                bgm.play();
-            }
-        } catch (e) { console.warn("Audio Context blocked or file missing:", e); }
+        // Audio will be handled in GameScene for better synchronization with the run starting.
 
-        // Meeting Start Sound - Safe play with Autoplay Bypass
-        const playMeetingIfReady = () => {
-            if (this.cache.audio.exists('sfx_meeting')) {
-                this.sound.play('sfx_meeting', { volume: 0.8 });
-            }
-        };
-
-        // Try playing immediately
-        playMeetingIfReady();
-
-        // One-time interaction listener to bypass browser audio block
-        this.input.once('pointerdown', playMeetingIfReady);
-        window.addEventListener('keydown', playMeetingIfReady, { once: true });
 
         // Background decorative lines
         const g = this.add.graphics();
@@ -715,6 +693,82 @@
         this.nextSpawnGap = Phaser.Math.Between(800, 1100);
         this.nextMilestone = 1000; // Notify per km
         this.ending = false;
+
+        // --- 7. MISSION BRIEFING & WARMUP ---
+        this.gameStarted = false;
+        this.physics.world.pause();
+
+        const briefing = this.add.container(0, 0).setDepth(2000);
+        const bg = this.add.rectangle(GAME_WIDTH/2, GAME_HEIGHT/2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.7);
+        
+        const warnText = this.add.text(GAME_WIDTH/2, GAME_HEIGHT * 0.35, "⚠ MISSION BRIEFING ⚠", {
+            fontFamily: "Orbitron, sans-serif", fontSize: "42px", color: "#ff0044", fontStyle: "900"
+        }).setOrigin(0.5).setShadow(0, 0, "#ff0044", 20, true, true);
+
+        const instructText = this.add.text(GAME_WIDTH/2, GAME_HEIGHT * 0.5, 
+            "PAY ATTENTION TO THE ENVIRONMENT / DETAILS\nSECURITY CODES DETECTED ON ROUTE\nDECRYPT FOR FINAL EXIT", {
+            fontFamily: "Orbitron, sans-serif", fontSize: "20px", color: "#ffffff", align: "center", lineSpacing: 10
+        }).setOrigin(0.5);
+
+        const readyText = this.add.text(GAME_WIDTH/2, GAME_HEIGHT * 0.7, "PREPARING INJECTION...", {
+            fontFamily: "Orbitron, sans-serif", fontSize: "24px", color: "#00ffff", fontStyle: "700"
+        }).setOrigin(0.5);
+
+        briefing.add([bg, warnText, instructText, readyText]);
+
+        // Pulsing Warning
+        this.tweens.add({
+            targets: warnText,
+            alpha: 0.3,
+            duration: 500,
+            yoyo: true,
+            repeat: -1
+        });
+
+        // Player Warmup Animations
+        this.time.addEvent({
+            delay: 1000,
+            repeat: 3,
+            callback: () => {
+                // Little warmup hop
+                this.tweens.add({
+                    targets: this.playerVisual,
+                    y: GROUND_TOP - 60,
+                    duration: 200,
+                    yoyo: true,
+                    onStart: () => {
+                        // Swing limbs
+                        this.tweens.add({ targets: this.fArm, angle: -40, duration: 200, yoyo: true });
+                        this.tweens.add({ targets: this.bArm, angle: 40, duration: 200, yoyo: true });
+                    }
+                });
+            }
+        });
+
+        // Start Sequence
+        this.time.delayedCall(5000, () => {
+            readyText.setText("ENGAGING DRIVE...");
+            readyText.setColor("#00ff00");
+            
+            this.tweens.add({
+                targets: briefing,
+                alpha: 0,
+                duration: 500,
+                onComplete: () => {
+                    briefing.destroy();
+                    this.gameStarted = true;
+                    this.physics.world.resume();
+                    
+                    // Start run audio
+                    if (this.cache.audio.exists('music_drip')) {
+                        this.sound.play('music_drip', { loop: true, volume: 0.6 });
+                    }
+                    if (this.cache.audio.exists('sfx_meeting')) {
+                        this.sound.play('sfx_meeting', { volume: 0.8 });
+                    }
+                }
+            });
+        });
       }
 
       spawnObstacle() {
@@ -856,8 +910,14 @@
       }
 
       update(_t, delta) {
-        if (this.ending) {
-          // death animation updates bounds automatically
+        if (!this.gameStarted || this.ending) {
+          // death or briefing animation updates
+          // still move stars for visual interest
+          const dt_brief = delta / 1000;
+          for(let s of this.stars) {
+             s.x -= s.speed * dt_brief * 50 * 0.04; // Slow drift
+             if(s.x < -10) { s.x = GAME_WIDTH + 10; s.y = Phaser.Math.Between(0, GROUND_TOP-50); }
+          }
           return;
         }
 
