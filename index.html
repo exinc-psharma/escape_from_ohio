@@ -373,10 +373,12 @@
             if (this.sound.context.state === 'suspended') {
                 this.sound.context.resume();
             }
-            // Start subtle menu music as proof of sound
-            let m = this.sound.get('music_drip');
-            if (!m) m = this.sound.add('music_drip', { loop: true, volume: 0.3 });
-            if (m && !m.isPlaying) m.play();
+            // ONLY attempt to play if the asset has finished loading into the cache
+            if (this.cache.audio.exists('music_drip')) {
+                let m = this.sound.get('music_drip');
+                if (!m) m = this.sound.add('music_drip', { loop: true, volume: 0.3 });
+                if (m && !m.isPlaying) m.play();
+            }
         };
 
         // Listen for ANY interaction to unlock sound
